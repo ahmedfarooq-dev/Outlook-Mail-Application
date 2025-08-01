@@ -1,1 +1,0 @@
-<a href="{{ route('outlook.connect') }}" class="btn btn-primary">Connect to Outlook</a>

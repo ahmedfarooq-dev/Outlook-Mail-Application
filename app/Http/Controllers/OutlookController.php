@@ -75,7 +75,7 @@ class OutlookController extends Controller
             ->get('https://graph.microsoft.com/v1.0/me/mailfolders/sentitems/messages?$top=50');
         Log::info($inbox);
         Log::info($sent);
-        return view('emails', [
+        return view('outlook.emails', [
             'inbox' => $inbox->json()['value'] ?? [],
             'sent' => $sent->json()['value'] ?? []
         ]);
@@ -97,7 +97,7 @@ class OutlookController extends Controller
 
         $email = $response->json();
 
-        return view('email-view', compact('email'));
+        return view('outlook.email-view', compact('email'));
     }
     public function downloadAttachment($emailId, $attachmentId)
     {
