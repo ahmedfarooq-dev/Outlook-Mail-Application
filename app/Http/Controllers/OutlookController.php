@@ -247,6 +247,7 @@ class OutlookController extends Controller
                 'client_secret' => $this->clientSecret,
                 'refresh_token' => Session::get('outlook_refresh_token'),
                 'grant_type' => 'refresh_token',
+                'redirect_uri' => $this->redirectUri,
                 'scope' => $this->scopes
             ]);
 
