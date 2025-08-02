@@ -11,6 +11,7 @@ Route::get('/outlook/connect', [OutlookController::class, 'connect'])->name('out
 Route::get('/outlook/callback', [OutlookController::class, 'callback']);
 Route::get('/outlook/emails', [OutlookController::class, 'emails'])->name('outlook.emails');
 Route::get('/outlook/disconnect', [OutlookController::class, 'disconnect'])->name('outlook.disconnect');
-Route::get('/outlook/email/{id}', [OutlookController::class, 'showEmail'])->name('outlook.email.show');
+Route::get('/outlook/sent/{id}', [OutlookController::class, 'showSentEmail'])->name('outlook.sent.show');
+Route::get('/outlook/inbox/{id}', [OutlookController::class, 'showInboxEmail'])->name('outlook.inbox.show');
 Route::get('/outlook/email/{emailId}/attachment/{attachmentId}', [OutlookController::class, 'downloadAttachment'])
     ->name('outlook.attachment.download');
