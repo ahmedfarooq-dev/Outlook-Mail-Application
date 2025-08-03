@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\OutlookAuthService;
 use App\Services\OutlookMailService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class OutlookController extends Controller
 {
@@ -36,14 +37,73 @@ class OutlookController extends Controller
 
     public function emails()
     {
-        $emails = $this->mailService->getEmails();
-
-        if (!$emails) {
+        // Only check if user is authenticated, don't load any emails yet
+        if (!$this->authService->ensureValidToken()) {
             return redirect()->route('outlook.connect')
                 ->with('error', 'Session expired. Please reconnect to Outlook.');
         }
 
-        return view('outlook.emails', $emails);
+        return view('outlook.emails');
+    }
+
+    // NEW METHOD: Get inbox emails via AJAX
+    public function getInboxEmails()
+    {
+        // Check if user is authenticated
+        if (!$this->authService->ensureValidToken()) {
+            return response()->json(['error' => 'Session expired. Please reconnect to Outlook.'], 401);
+        }
+        $cacheKey = 'outlook_inbox_' . session()->getId();
+        $forceRefresh = request()->input('forceRefresh');
+
+        // Check cache first (5 minutes)
+        if (!$forceRefresh && cache()->has($cacheKey)) {
+            return response()->json(cache($cacheKey));
+        }
+        Log::info('Fetching emails from folder inbox');
+
+        $inbox = $this->mailService->getFolderEmails('inbox');
+
+        if (!$inbox['success']) {
+            return response()->json(['error' => 'Failed to load inbox'], 500);
+        }
+
+        $data = ['emails' => $inbox['data']];
+
+        // Cache for 5 minutes
+        cache()->put($cacheKey, $data, now()->addMinutes(5));
+
+        return response()->json($data);
+    }
+
+    // NEW METHOD: Get sent emails via AJAX
+    public function getSentEmails()
+    {
+        // Check if user is authenticated
+        if (!$this->authService->ensureValidToken()) {
+            return response()->json(['error' => 'Session expired. Please reconnect to Outlook.'], 401);
+        }
+        $cacheKey = 'outlook_sent_' . session()->getId();
+        $forceRefresh = request()->input('forceRefresh');
+
+        // Check cache first (5 minutes)
+        if (!$forceRefresh && cache()->has($cacheKey)) {
+            return response()->json(cache($cacheKey));
+        }
+        Log::info('Fetching emails from folder sent');
+
+        $sent = $this->mailService->getFolderEmails('sentitems');
+
+        if (!$sent['success']) {
+            return response()->json(['error' => 'Failed to load sent items'], 500);
+        }
+
+        $data = ['emails' => $sent['data']];
+
+        // Cache for 5 minutes
+        cache()->put($cacheKey, $data, now()->addMinutes(5));
+
+        return response()->json($data);
     }
 
     public function showEmail($id, $folder = null)

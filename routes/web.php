@@ -15,3 +15,5 @@ Route::get('/outlook/sent/{id}', [OutlookController::class, 'showSentEmail'])->n
 Route::get('/outlook/inbox/{id}', [OutlookController::class, 'showInboxEmail'])->name('outlook.inbox.show');
 Route::get('/outlook/email/{emailId}/attachment/{attachmentId}', [OutlookController::class, 'downloadAttachment'])
     ->name('outlook.attachment.download');
+Route::get('/outlook/api/inbox', [OutlookController::class, 'getInboxEmails'])->name('outlook.api.inbox');
+Route::get('/outlook/api/sent', [OutlookController::class, 'getSentEmails'])->name('outlook.api.sent');
