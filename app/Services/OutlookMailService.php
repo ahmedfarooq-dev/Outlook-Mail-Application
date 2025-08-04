@@ -49,10 +49,10 @@ class OutlookMailService
         }
     }
 
-    public function getFolderEmails($folder, $top = 50)
+    public function getFolderEmails($folder, $top = 5, $skip = 0)
     {
         $response = Http::withToken(session('outlook_token'))
-            ->get("https://graph.microsoft.com/v1.0/me/mailfolders/{$folder}/messages?$top={$top}");
+            ->get("https://graph.microsoft.com/v1.0/me/mailfolders/{$folder}/messages?\$top={$top}&\$skip={$skip}&\$orderby=receivedDateTime desc");
 
         return [
             'success' => $response->successful(),

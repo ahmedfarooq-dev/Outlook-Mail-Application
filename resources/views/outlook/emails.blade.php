@@ -42,6 +42,21 @@
             <div id="inbox-content" style="display: none;">
                 <!-- Emails will be loaded here -->
             </div>
+
+            <!-- Inbox Pagination -->
+            <nav id="inbox-pagination" style="display: none;">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item" id="inbox-prev-page">
+                        <a class="page-link" href="#" data-page="prev">Previous</a>
+                    </li>
+                    <li class="page-item active" id="inbox-current-page">
+                        <span class="page-link">1</span>
+                    </li>
+                    <li class="page-item" id="inbox-next-page">
+                        <a class="page-link" href="#" data-page="next">Next</a>
+                    </li>
+                </ul>
+            </nav>
         </div>
 
         <!-- Sent Items Tab -->
@@ -66,47 +81,103 @@
             <div id="sent-content">
                 <div class="alert alert-info">Click to load sent emails</div>
             </div>
+
+            <!-- Sent Pagination -->
+            <nav id="sent-pagination" style="display: none;">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item" id="sent-prev-page">
+                        <a class="page-link" href="#" data-page="prev">Previous</a>
+                    </li>
+                    <li class="page-item active" id="sent-current-page">
+                        <span class="page-link">1</span>
+                    </li>
+                    <li class="page-item" id="sent-next-page">
+                        <a class="page-link" href="#" data-page="next">Next</a>
+                    </li>
+                </ul>
+            </nav>
         </div>
     </div>
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-    let inboxLoaded = false;
-    let sentLoaded = false;
+    // public/js/outlook-emails.js
+document.addEventListener('DOMContentLoaded', function() {
+    let inboxCurrentPage = 1;
+    let sentCurrentPage = 1;
 
     // Load inbox immediately when page loads
     loadInbox();
 
     // Tab switch event listeners
     document.getElementById('inbox-tab').addEventListener('click', function() {
-            loadInbox();
+        loadInbox();
     });
 
     document.getElementById('sent-tab').addEventListener('click', function() {
-            loadSent();
+        loadSent();
     });
- // Refresh button event listeners
+
+    // Refresh button event listeners
     document.getElementById('refresh-inbox').addEventListener('click', function() {
         this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
         this.disabled = true;
+        inboxCurrentPage = 1; // Reset to first page
         loadInbox(true); // Force refresh
     });
 
     document.getElementById('refresh-sent').addEventListener('click', function() {
         this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
         this.disabled = true;
+        sentCurrentPage = 1; // Reset to first page
         loadSent(true); // Force refresh
     });
-    function loadInbox(forceRefresh = false) {        
+
+    // Inbox pagination event listeners
+    document.getElementById('inbox-prev-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if (inboxCurrentPage > 1) {
+            inboxCurrentPage--;
+            loadInbox();
+        }
+    });
+
+    document.getElementById('inbox-next-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if (!this.classList.contains('disabled')) {
+            inboxCurrentPage++;
+            loadInbox();
+        }
+    });
+
+    // Sent pagination event listeners
+    document.getElementById('sent-prev-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if (sentCurrentPage > 1) {
+            sentCurrentPage--;
+            loadSent();
+        }
+    });
+
+    document.getElementById('sent-next-page').addEventListener('click', function(e) {
+        e.preventDefault();
+        if (!this.classList.contains('disabled')) {
+            sentCurrentPage++;
+            loadSent();
+        }
+    });
+
+    function loadInbox(forceRefresh = false) {
         document.getElementById('inbox-loading').style.display = 'block';
         document.getElementById('inbox-content').style.display = 'none';
-        const url = forceRefresh ? '/outlook/api/inbox?refresh=true' : '/outlook/api/inbox';
+        document.getElementById('inbox-pagination').style.display = 'none';
+
+        let url = `/outlook/api/inbox?page=${inboxCurrentPage}`;
+        if (forceRefresh) url += '&refresh=true';
 
         fetch(url)
             .then(response => {
                 if (response.status === 401) {
-                    // Session expired, redirect to connect page
                     window.location.href = '/outlook/connect';
                     return;
                 }
@@ -114,12 +185,14 @@
             })
             .then(data => {
                 if (!data) return;
+                
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
                 displayInboxEmails(data.emails);
-                document.getElementById('inbox-count').textContent = data.emails.length + ' emails';
+                updateInboxPagination(data.currentPage, data.hasMore);
+                document.getElementById('inbox-count').textContent = `Page ${data.currentPage}`;
             })
             .catch(error => {
                 console.error('Error loading inbox:', error);
@@ -129,18 +202,23 @@
             })
             .finally(() => {
                 document.getElementById('inbox-loading').style.display = 'none';
+                const refreshBtn = document.getElementById('refresh-inbox');
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+                refreshBtn.disabled = false;
             });
     }
 
     function loadSent(forceRefresh = false) {
         document.getElementById('sent-loading').style.display = 'block';
         document.getElementById('sent-content').innerHTML = '';
-        const url = forceRefresh ? '/outlook/api/sent?refresh=true' : '/outlook/api/sent';
+        document.getElementById('sent-pagination').style.display = 'none';
+
+        let url = `/outlook/api/sent?page=${sentCurrentPage}`;
+        if (forceRefresh) url += '&refresh=true';
 
         fetch(url)
             .then(response => {
                 if (response.status === 401) {
-                    // Session expired, redirect to connect page
                     window.location.href = '/outlook/connect';
                     return;
                 }
@@ -148,12 +226,14 @@
             })
             .then(data => {
                 if (!data) return;
+                
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
                 displaySentEmails(data.emails);
-                document.getElementById('sent-count').textContent = data.emails.length + ' emails';
+                updateSentPagination(data.currentPage, data.hasMore);
+                document.getElementById('sent-count').textContent = `Page ${data.currentPage}`;
             })
             .catch(error => {
                 console.error('Error loading sent items:', error);
@@ -162,7 +242,60 @@
             })
             .finally(() => {
                 document.getElementById('sent-loading').style.display = 'none';
+                const refreshBtn = document.getElementById('refresh-sent');
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+                refreshBtn.disabled = false;
             });
+    }
+
+    function updateInboxPagination(currentPage, hasMore) {
+        const pagination = document.getElementById('inbox-pagination');
+        const prevBtn = document.getElementById('inbox-prev-page');
+        const currentPageSpan = document.getElementById('inbox-current-page');
+        const nextBtn = document.getElementById('inbox-next-page');
+
+        currentPageSpan.innerHTML = `<span class="page-link">${currentPage}</span>`;
+        
+        // Update Previous button
+        if (currentPage <= 1) {
+            prevBtn.classList.add('disabled');
+        } else {
+            prevBtn.classList.remove('disabled');
+        }
+
+        // Update Next button - disable if no more emails
+        if (!hasMore) {
+            nextBtn.classList.add('disabled');
+        } else {
+            nextBtn.classList.remove('disabled');
+        }
+
+        pagination.style.display = 'block';
+    }
+
+    function updateSentPagination(currentPage, hasMore) {
+        const pagination = document.getElementById('sent-pagination');
+        const prevBtn = document.getElementById('sent-prev-page');
+        const currentPageSpan = document.getElementById('sent-current-page');
+        const nextBtn = document.getElementById('sent-next-page');
+
+        currentPageSpan.innerHTML = `<span class="page-link">${currentPage}</span>`;
+        
+        // Update Previous button
+        if (currentPage <= 1) {
+            prevBtn.classList.add('disabled');
+        } else {
+            prevBtn.classList.remove('disabled');
+        }
+
+        // Update Next button - disable if no more emails
+        if (!hasMore) {
+            nextBtn.classList.add('disabled');
+        } else {
+            nextBtn.classList.remove('disabled');
+        }
+
+        pagination.style.display = 'block';
     }
 
     function displayInboxEmails(emails) {
