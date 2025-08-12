@@ -14,44 +14,20 @@ class OutlookMailService
         $this->authService = $authService;
     }
 
-    public function getEmails()
+    public function getFolderEmails($folder, $top = 5, $skip = 0, $account = null)
     {
-        if (!$this->authService->ensureValidToken()) {
-            return false;
+        if (!$account) {
+            $account = $this->authService->getCurrentAccount();
         }
-
-        try {
-            $inbox = $this->getFolderEmails('inbox');
-            $sent = $this->getFolderEmails('sentitems');
-
-            if (!$inbox['success'] || !$sent['success']) {
-                Log::error('Failed to fetch emails', [
-                    'inbox_status' => $inbox['status'],
-                    'sent_status' => $sent['status'],
-                    'inbox_error' => $inbox['error'],
-                    'sent_error' => $sent['error']
-                ]);
-
-                if ($this->authService->refreshToken()) {
-                    return $this->getEmails(); // Retry after refresh
-                }
-
-                return false;
-            }
-
+        if (!$account || !$this->authService->ensureValidToken($account)) {
             return [
-                'inbox' => $inbox['data'] ?? [],
-                'sent' => $sent['data'] ?? []
+                'success' => false,
+                'status' => 401,
+                'data' => [],
+                'error' => 'Authentication failed'
             ];
-        } catch (\Exception $e) {
-            Log::error('Exception in getEmails method', ['error' => $e->getMessage()]);
-            return false;
         }
-    }
-
-    public function getFolderEmails($folder, $top = 5, $skip = 0)
-    {
-        $response = Http::withToken(session('outlook_token'))
+        $response = Http::withToken($account->access_token)
             ->get("https://graph.microsoft.com/v1.0/me/mailfolders/{$folder}/messages?\$top={$top}&\$skip={$skip}&\$orderby=receivedDateTime desc");
 
         return [
@@ -62,9 +38,13 @@ class OutlookMailService
         ];
     }
 
-    public function getEmail($id, $folder = null)
+    public function getEmail($id, $folder = null, $account = null)
     {
-        if (!$this->authService->ensureValidToken()) {
+        if (!$account) {
+            $account = $this->authService->getCurrentAccount();
+        }
+
+        if (!$account || !$this->authService->ensureValidToken($account)) {
             return false;
         }
 
@@ -72,12 +52,13 @@ class OutlookMailService
             ? "https://graph.microsoft.com/v1.0/me/mailfolders/sentitems/messages/{$id}"
             : "https://graph.microsoft.com/v1.0/me/messages/{$id}";
 
-        $response = Http::withToken(session('outlook_token'))
+        $response = Http::withToken($account->access_token)
             ->get($endpoint . '?$expand=attachments');
 
         if (!$response->successful()) {
-            if ($this->authService->refreshToken()) {
-                $response = Http::withToken(session('outlook_token'))
+            if ($this->authService->refreshToken($account)) {
+                $account->refresh();
+                $response = Http::withToken($account->access_token)
                     ->get($endpoint . '?$expand=attachments');
             }
 
@@ -89,18 +70,22 @@ class OutlookMailService
         return $response->json();
     }
 
-    public function downloadAttachment($emailId, $attachmentId)
+    public function downloadAttachment($emailId, $attachmentId, $account = null)
     {
-        if (!$this->authService->ensureValidToken()) {
-            return false;
+        if (!$account) {
+            $account = $this->authService->getCurrentAccount();
         }
 
-        $response = Http::withToken(session('outlook_token'))
+        if (!$account || !$this->authService->ensureValidToken($account)) {
+            return false;
+        }
+        $response = Http::withToken($account->access_token)
             ->get("https://graph.microsoft.com/v1.0/me/messages/{$emailId}/attachments/{$attachmentId}");
 
         if (!$response->successful()) {
-            if ($this->authService->refreshToken()) {
-                $response = Http::withToken(session('outlook_token'))
+            if ($this->authService->refreshToken($account)) {
+                $account->refresh();
+                $response = Http::withToken($account->access_token)
                     ->get("https://graph.microsoft.com/v1.0/me/messages/{$emailId}/attachments/{$attachmentId}");
             }
 

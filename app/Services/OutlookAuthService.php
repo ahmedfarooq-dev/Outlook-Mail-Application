@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\OutlookAccount;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
@@ -18,7 +19,7 @@ class OutlookAuthService
         $this->clientId = config('services.outlook.client_id');
         $this->clientSecret = config('services.outlook.client_secret');
         $this->redirectUri = config('services.outlook.redirect_uri');
-        $this->scopes = 'openid offline_access https://graph.microsoft.com/Mail.Read';
+        $this->scopes = 'openid offline_access User.Read Mail.Read Mail.ReadWrite';
     }
 
     public function getAuthUrl()
@@ -46,19 +47,77 @@ class OutlookAuthService
 
         return $response->json();
     }
-
-    public function refreshToken()
+    public function storeTokens($tokens)
     {
-        if (!Session::has('outlook_refresh_token')) {
-            Log::error('No refresh token available');
+        if (!isset($tokens['access_token'])) {
             return false;
         }
 
+        // Get user info to identify the account
+        $userInfo = $this->getUserInfo($tokens['access_token']);
+        if (!$userInfo) {
+            return false;
+        }
+        // Store or update the account
+        $account = OutlookAccount::updateOrCreate(
+            ['email' => $userInfo['mail'] ?? $userInfo['userPrincipalName']],
+            [
+                'name' => $userInfo['displayName'] ?? 'Unknown',
+                'access_token' => $tokens['access_token'],
+                'refresh_token' => $tokens['refresh_token'],
+                'token_expires_at' => now()->addSeconds($tokens['expires_in'] ?? 3600),
+                'is_active' => true
+            ]
+        );
+
+        // Store current account ID in session
+        Session::put('current_outlook_account_id', $account->id);
+        return $account;
+    }
+    private function getUserInfo($accessToken)
+    {
+        $response = Http::withToken($accessToken)
+            ->get('https://graph.microsoft.com/v1.0/me');
+        Log::info($response);
+        return $response->successful() ? $response->json() : null;
+    }
+
+
+    public function getCurrentAccount()
+    {
+        $accountId = Session::get('current_outlook_account_id');
+        if (!$accountId) {
+            return null;
+        }
+
+        return OutlookAccount::active()->find($accountId);
+    }
+
+    public function switchAccount($accountId)
+    {
+        $account = OutlookAccount::active()->find($accountId);
+        if (!$account) {
+            return false;
+        }
+
+        Session::put('current_outlook_account_id', $accountId);
+        return $account;
+    }
+
+    public function refreshToken($account = null)
+    {
+        if (!$account) {
+            $account = $this->getCurrentAccount();
+        }
+        if (!$account || !$account->refresh_token) {
+            Log::error('No account or refresh token available');
+            return false;
+        }
         try {
             $response = Http::asForm()->post('https://login.microsoftonline.com/common/oauth2/v2.0/token', [
                 'client_id' => $this->clientId,
                 'client_secret' => $this->clientSecret,
-                'refresh_token' => Session::get('outlook_refresh_token'),
+                'refresh_token' => $account->refresh_token,
                 'grant_type' => 'refresh_token',
                 'redirect_uri' => $this->redirectUri,
                 'scope' => $this->scopes
@@ -68,15 +127,13 @@ class OutlookAuthService
                 $tokens = $response->json();
 
                 if (isset($tokens['access_token'])) {
-                    Session::put('outlook_token', $tokens['access_token']);
+                    $account->update([
+                        'access_token' => $tokens['access_token'],
+                        'refresh_token' => $tokens['refresh_token'] ?? $account->refresh_token,
+                        'token_expires_at' => now()->addSeconds($tokens['expires_in'] ?? 3600)
+                    ]);
 
-                    if (isset($tokens['refresh_token'])) {
-                        Session::put('outlook_refresh_token', $tokens['refresh_token']);
-                    }
-
-                    Session::put('outlook_token_expires_at', now()->addSeconds($tokens['expires_in'] ?? 3600));
-
-                    Log::info('Token refreshed successfully');
+                    Log::info('Token refreshed successfully for account: ' . $account->email);
                     return true;
                 }
             }
@@ -89,54 +146,53 @@ class OutlookAuthService
             Log::error('Exception during token refresh', ['error' => $e->getMessage()]);
         }
 
-        Session::forget(['outlook_token', 'outlook_refresh_token', 'outlook_token_expires_at']);
+        // Mark account as inactive if refresh fails
+        $account->update(['is_active' => false]);
         return false;
     }
-
-    public function ensureValidToken()
+    public function ensureValidToken($account = null)
     {
-        if (!Session::has('outlook_token') || !Session::has('outlook_refresh_token')) {
-            Log::info('No token or refresh token found');
+        if (!$account) {
+            $account = $this->getCurrentAccount();
+        }
+
+        if (!$account) {
+            Log::info('No current account found');
             return false;
         }
 
-        $expiresAt = Session::get('outlook_token_expires_at');
-        if ($expiresAt && now()->addMinutes(5)->greaterThan($expiresAt)) {
-            Log::info('Token expired or about to expire, refreshing', [
-                'expires_at' => $expiresAt,
-                'current_time' => now()
-            ]);
-            return $this->refreshToken();
+        if ($account->isTokenExpired()) {
+            Log::info('Token expired for account: ' . $account->email . ', refreshing');
+            return $this->refreshToken($account);
         }
 
-        if (!$expiresAt) {
-            Log::debug('No expiry time set, assuming token is valid');
-            return true;
-        }
-
-        if (now()->second % 30 == 0) {
-            Log::debug('Token is still valid', [
-                'expires_at' => $expiresAt,
-                'current_time' => now(),
-                'minutes_until_expiry' => now()->diffInMinutes($expiresAt, false)
-            ]);
-        }
         return true;
     }
-    public function storeTokens($tokens)
-    {
-        if (isset($tokens['access_token'])) {
-            Session::put('outlook_token', $tokens['access_token']);
-            Session::put('outlook_refresh_token', $tokens['refresh_token']);
-            Session::put('outlook_token_expires_at', now()->addSeconds($tokens['expires_in'] ?? 3600));
-            return true;
-        }
-        return false;
-    }
 
+    public function getAllAccounts()
+    {
+        return OutlookAccount::active()->orderBy('created_at', 'desc')->get();
+    }
+    public function disconnectAccount($accountId = null)
+    {
+        if ($accountId) {
+            $account = OutlookAccount::find($accountId);
+            if ($account) {
+                $account->update(['is_active' => false]);
+            }
+        } else {
+            // Disconnect current account
+            $account = $this->getCurrentAccount();
+            if ($account) {
+                $account->update(['is_active' => false]);
+            }
+            Session::forget('current_outlook_account_id');
+        }
+
+        return true;
+    }
     public function disconnect()
     {
-        Session::forget(['outlook_token', 'outlook_refresh_token', 'outlook_token_expires_at']);
-        return true;
+        return $this->disconnectAccount();
     }
 }

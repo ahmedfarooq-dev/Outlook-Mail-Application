@@ -1,14 +1,56 @@
-<!-- resources/views/outlook/emails.blade.php -->
+{{-- resources/views/outlook/emails.blade.php --}}
 @extends('outlook.layout.app')
 
 @section('title', 'Outlook Emails')
 
-@section('disconnect_button')
-<a href="{{ route('outlook.disconnect') }}" class="btn btn-danger">Disconnect Outlook</a>
-@endsection
-
 @section('content')
 <div class="container">
+    <!-- Account Switcher -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Emails for {{ $currentAccount->email }}</h2>
+            <small class="text-muted">{{ $currentAccount->name }}</small>
+        </div>
+        <div class="d-flex gap-2">
+            <!-- Account Dropdown -->
+            @if($accounts->count() > 1)
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                    aria-expanded="false">
+                    Switch Account
+                </button>
+                <ul class="dropdown-menu">
+                    @foreach($accounts as $account)
+                    @if($account->id != $currentAccount->id)
+                    <li>
+                        <a class="dropdown-item" href="{{ route('outlook.switch', $account->id) }}">
+                            <strong>{{ $account->name }}</strong><br>
+                            <small class="text-muted">{{ $account->email }}</small>
+                        </a>
+                    </li>
+                    @endif
+                    @endforeach
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ route('outlook.index') }}">
+                            <i class="fas fa-plus"></i> Add Account
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            @endif
+
+            <a href="{{ route('outlook.index') }}" class="btn btn-outline-primary">
+                <i class="fas fa-cog"></i> Manage Accounts
+            </a>
+            <a href="{{ route('outlook.disconnect') }}" class="btn btn-danger">
+                <i class="fas fa-sign-out-alt"></i> Disconnect Current
+            </a>
+        </div>
+    </div>
+
     <!-- Navigation Tabs -->
     <ul class="nav nav-tabs mb-4">
         <li class="nav-item">
@@ -23,7 +65,7 @@
         <!-- Inbox Tab -->
         <div class="tab-pane fade show active" id="inbox">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2>Inbox</h2>
+                <h3>Inbox</h3>
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-sm btn-outline-primary" id="refresh-inbox">
                         <i class="fas fa-sync-alt"></i> Refresh
@@ -62,7 +104,7 @@
         <!-- Sent Items Tab -->
         <div class="tab-pane fade" id="sent">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2>Sent Items</h2>
+                <h3>Sent Items</h3>
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-sm btn-outline-primary" id="refresh-sent">
                         <i class="fas fa-sync-alt"></i> Refresh
@@ -101,7 +143,8 @@
 </div>
 
 <script>
-    // public/js/outlook-emails.js
+    // Same JavaScript as before - no changes needed for multiple accounts
+// The backend now handles account switching automatically
 document.addEventListener('DOMContentLoaded', function() {
     let inboxCurrentPage = 1;
     let sentCurrentPage = 1;
@@ -122,15 +165,15 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('refresh-inbox').addEventListener('click', function() {
         this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
         this.disabled = true;
-        inboxCurrentPage = 1; // Reset to first page
-        loadInbox(true); // Force refresh
+        inboxCurrentPage = 1;
+        loadInbox(true);
     });
 
     document.getElementById('refresh-sent').addEventListener('click', function() {
         this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
         this.disabled = true;
-        sentCurrentPage = 1; // Reset to first page
-        loadSent(true); // Force refresh
+        sentCurrentPage = 1;
+        loadSent(true);
     });
 
     // Inbox pagination event listeners
@@ -178,7 +221,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch(url)
             .then(response => {
                 if (response.status === 401) {
-                    window.location.href = '/outlook/connect';
+                    window.location.href = '/outlook';
                     return;
                 }
                 return response.json();
@@ -219,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch(url)
             .then(response => {
                 if (response.status === 401) {
-                    window.location.href = '/outlook/connect';
+                    window.location.href = '/outlook';
                     return;
                 }
                 return response.json();
@@ -256,14 +299,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         currentPageSpan.innerHTML = `<span class="page-link">${currentPage}</span>`;
         
-        // Update Previous button
         if (currentPage <= 1) {
             prevBtn.classList.add('disabled');
         } else {
             prevBtn.classList.remove('disabled');
         }
 
-        // Update Next button - disable if no more emails
         if (!hasMore) {
             nextBtn.classList.add('disabled');
         } else {
@@ -281,14 +322,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         currentPageSpan.innerHTML = `<span class="page-link">${currentPage}</span>`;
         
-        // Update Previous button
         if (currentPage <= 1) {
             prevBtn.classList.add('disabled');
         } else {
             prevBtn.classList.remove('disabled');
         }
 
-        // Update Next button - disable if no more emails
         if (!hasMore) {
             nextBtn.classList.add('disabled');
         } else {

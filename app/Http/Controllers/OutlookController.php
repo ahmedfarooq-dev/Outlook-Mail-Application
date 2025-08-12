@@ -2,6 +2,7 @@
 // app/Http/Controllers/OutlookController.php
 namespace App\Http\Controllers;
 
+use App\Models\OutlookAccount;
 use App\Services\OutlookAuthService;
 use App\Services\OutlookMailService;
 use Illuminate\Http\Request;
@@ -17,7 +18,13 @@ class OutlookController extends Controller
         $this->authService = $authService;
         $this->mailService = $mailService;
     }
+    public function index()
+    {
+        $accounts = $this->authService->getAllAccounts();
+        $currentAccount = $this->authService->getCurrentAccount();
 
+        return view('outlook.connect-to-outlook', compact('accounts', 'currentAccount'));
+    }
     public function connect()
     {
         return redirect()->away($this->authService->getAuthUrl());
@@ -27,37 +34,59 @@ class OutlookController extends Controller
     {
         $code = $request->query('code');
         $tokens = $this->authService->getTokensFromAuthCode($code);
-
-        if ($this->authService->storeTokens($tokens)) {
-            return redirect()->route('outlook.emails');
+        $account = $this->authService->storeTokens($tokens);
+        if ($account) {
+            return redirect()->route('outlook.emails')
+                ->with('success', 'Successfully connected ' . $account->email);
         }
 
-        return redirect('/')->with('error', 'Failed to connect to Outlook');
+        return redirect()->route('outlook.index')
+            ->with('error', 'Failed to connect to Outlook');
     }
+    public function switchAccount($accountId)
+    {
+        $account = $this->authService->switchAccount($accountId);
 
+        if ($account) {
+            return redirect()->route('outlook.emails')
+                ->with('success', 'Switched to ' . $account->email);
+        }
+
+        return redirect()->route('outlook.index')
+            ->with('error', 'Failed to switch account');
+    }
     public function emails()
     {
-        // Only check if user is authenticated, don't load any emails yet
-        if (!$this->authService->ensureValidToken()) {
-            return redirect()->route('outlook.connect')
-                ->with('error', 'Session expired. Please reconnect to Outlook.');
+        $currentAccount = $this->authService->getCurrentAccount();
+
+        if (!$currentAccount) {
+            return redirect()->route('outlook.index')
+                ->with('error', 'No active Outlook account. Please connect an account.');
         }
 
-        return view('outlook.emails');
+        if (!$this->authService->ensureValidToken($currentAccount)) {
+            return redirect()->route('outlook.index')
+                ->with('error', 'Session expired for ' . $currentAccount->email . '. Please reconnect.');
+        }
+
+        $accounts = $this->authService->getAllAccounts();
+
+        return view('outlook.emails', compact('currentAccount', 'accounts'));
     }
 
     // NEW METHOD: Get inbox emails via AJAX
     public function getInboxEmails(Request $request)
     {
+        $currentAccount = $this->authService->getCurrentAccount();
         // Check if user is authenticated
-        if (!$this->authService->ensureValidToken()) {
+        if (!$currentAccount || !$this->authService->ensureValidToken($currentAccount)) {
             return response()->json(['error' => 'Session expired. Please reconnect to Outlook.'], 401);
         }
 
         $page = $request->query('page', 1);
         $perPage = 5;
         $forceRefresh = $request->query('refresh', false);
-        $cacheKey = 'outlook_inbox_page_' . $page . '_' . session()->getId();
+        $cacheKey = 'outlook_inbox_page_' . $page . '_' . $currentAccount->id;
 
         // Check cache first unless force refresh
         if (!$forceRefresh && cache()->has($cacheKey)) {
@@ -65,7 +94,7 @@ class OutlookController extends Controller
         }
         Log::info('Getting inbox emails for page ' . $page);
         $skip = ($page - 1) * $perPage;
-        $inbox = $this->mailService->getFolderEmails('inbox', $perPage, $skip);
+        $inbox = $this->mailService->getFolderEmails('inbox', $perPage, $skip, $currentAccount);
 
         if (!$inbox['success']) {
             return response()->json(['error' => 'Failed to load inbox'], 500);
@@ -75,7 +104,8 @@ class OutlookController extends Controller
             'emails' => $inbox['data'],
             'currentPage' => $page,
             'perPage' => $perPage,
-            'hasMore' => count($inbox['data']) >= $perPage
+            'hasMore' => count($inbox['data']) >= $perPage,
+            'account' => $currentAccount->email
         ];
 
         // Cache
@@ -87,15 +117,16 @@ class OutlookController extends Controller
     // NEW METHOD: Get sent emails via AJAX
     public function getSentEmails(Request $request)
     {
-        // Check if user is authenticated
-        if (!$this->authService->ensureValidToken()) {
+        $currentAccount = $this->authService->getCurrentAccount();
+
+        if (!$currentAccount || !$this->authService->ensureValidToken($currentAccount)) {
             return response()->json(['error' => 'Session expired. Please reconnect to Outlook.'], 401);
         }
 
         $page = $request->query('page', 1);
         $perPage = 5;
         $forceRefresh = $request->query('refresh', false);
-        $cacheKey = 'outlook_sent_page_' . $page . '_' . session()->getId();
+        $cacheKey = 'outlook_sent_page_' . $page . '_' . $currentAccount->id;
 
         // Check cache first unless force refresh
         if (!$forceRefresh && cache()->has($cacheKey)) {
@@ -103,7 +134,7 @@ class OutlookController extends Controller
         }
         Log::info('Getting sent emails for page ' . $page);
         $skip = ($page - 1) * $perPage;
-        $sent = $this->mailService->getFolderEmails('sentitems', $perPage, $skip);
+        $sent = $this->mailService->getFolderEmails('sentitems', $perPage, $skip, $currentAccount);
 
         if (!$sent['success']) {
             return response()->json(['error' => 'Failed to load sent items'], 500);
@@ -113,7 +144,8 @@ class OutlookController extends Controller
             'emails' => $sent['data'],
             'currentPage' => $page,
             'perPage' => $perPage,
-            'hasMore' => count($sent['data']) >= $perPage
+            'hasMore' => count($sent['data']) >= $perPage,
+            'account' => $currentAccount->email
         ];
 
         // Cache
@@ -124,7 +156,13 @@ class OutlookController extends Controller
 
     public function showEmail($id, $folder = null)
     {
-        $email = $this->mailService->getEmail($id, $folder);
+        $currentAccount = $this->authService->getCurrentAccount();
+
+        if (!$currentAccount) {
+            return redirect()->route('outlook.index')
+                ->with('error', 'No active account');
+        }
+        $email = $this->mailService->getEmail($id, $folder, $currentAccount);
 
         if (!$email) {
             return redirect()->route('outlook.emails')->with('error', 'Failed to load email');
@@ -145,7 +183,12 @@ class OutlookController extends Controller
 
     public function downloadAttachment($emailId, $attachmentId)
     {
-        $attachment = $this->mailService->downloadAttachment($emailId, $attachmentId);
+        $currentAccount = $this->authService->getCurrentAccount();
+
+        if (!$currentAccount) {
+            return back()->with('error', 'No active account');
+        }
+        $attachment = $this->mailService->downloadAttachment($emailId, $attachmentId, $currentAccount);
 
         if (!$attachment) {
             return back()->with('error', 'Failed to download attachment');
@@ -160,9 +203,18 @@ class OutlookController extends Controller
         return response()->make($content, 200, $headers);
     }
 
-    public function disconnect()
+    public function disconnect($accountId = null)
     {
-        $this->authService->disconnect();
-        return redirect('/')->with('success', 'Disconnected from Outlook');
+        if ($accountId) {
+            $account = OutlookAccount::find($accountId);
+            $this->authService->disconnectAccount($accountId);
+            $message = $account ? 'Disconnected ' . $account->email : 'Account disconnected';
+        } else {
+            $currentAccount = $this->authService->getCurrentAccount();
+            $this->authService->disconnect();
+            $message = $currentAccount ? 'Disconnected ' . $currentAccount->email : 'Account disconnected';
+        }
+
+        return redirect()->route('outlook.index')->with('success', $message);
     }
 }
