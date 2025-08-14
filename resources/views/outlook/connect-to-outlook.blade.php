@@ -34,7 +34,7 @@
                                 View Emails
                             </a>
                             @endif
-                            <a href="{{ route('outlook.disconnect', $account->id) }}"
+                            <a href="{{ route('outlook.disconnect.specific', $account->id) }}"
                                 class="btn btn-outline-danger btn-sm"
                                 onclick="return confirm('Are you sure you want to disconnect {{ $account->email }}?')">
                                 Disconnect
